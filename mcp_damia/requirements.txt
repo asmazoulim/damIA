@@ -1,0 +1,5 @@
+duckdb==1.5.0
+ollama==0.6.2
+pandas==3.0.1
+streamlit==1.58.0
+
