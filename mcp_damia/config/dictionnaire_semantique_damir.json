@@ -1,0 +1,444 @@
+{
+  "_meta": {
+    "projet": "DAMIA MCP — Assistant IA Open DAMIR",
+    "version": "0.2 — POC (enrichi descriptif CNAM + dim_prestations)",
+    "perimetre_temporel": "2022-2025",
+    "source": "Open DAMIR (CNAM / data.gouv.fr) — données ouvertes inter-régimes",
+    "table_principale": "damia_fact_hist (table de faits agrégée)",
+    "note": "Données ouvertes anonymisées. Aucune donnée individuelle ou sensible. Lecture seule.",
+    "note_indicateurs": "Les colonnes de montants de damia_fact_hist sont des indicateurs PRÉFILTRÉS (FLT_*) : le filtrage sur prs_rem_typ est DÉJÀ intégré dans la colonne. Ne PAS refaire de filtre prs_rem_typ manuellement.",
+    "note_classification": "Point de vigilance clé : les erreurs de montant (doublement) proviennent d'une mauvaise CLASSIFICATION des prestations (codes mal rattachés à une sous-catégorie, comptés deux fois), PAS du filtre prs_rem_typ. La fiabilité des montants par poste dépend donc de la justesse de dim_prestations (macro_categorie / sous_categorie_cor).",
+    "version_enrichissement": "synonymes + hors-périmètre + ordres de grandeur (19 juin)"
+  },
+  "tables": {
+    "damia_fact_hist": {
+      "description": "Table de faits agrégée des remboursements de l'Assurance Maladie, tous régimes confondus. Une ligne = une combinaison unique de dimensions (période, prestation, bénéficiaire...). Les montants sont déjà sommés (GROUP BY).",
+      "grain": "soi_ann × soi_moi × prs_nat × dimensions bénéficiaire/exécutant",
+      "filtre_obligatoire_global": "prs_rem_typ IN (0,1) pour la part légale AMO sur les montants remboursés"
+    },
+    "dim_prestations": {
+      "description": "Table de dimension décrivant chaque prestation (clé prs_nat). Contient la classification métier en macro-catégories et sous-catégories, ainsi que les flags paniers santé.",
+      "cle": "prs_nat"
+    },
+    "correspondance_ATC": {
+      "description": "Table de correspondance hiérarchique des médicaments (classification ATC). Trois niveaux : ATC1 (groupe anatomique), ATC2 (thérapeutique), ATC3 (pharmacologique).",
+      "cle": "code_atc3"
+    }
+  },
+  "mesures": {
+    "montant_rembourse": {
+      "label": "Montant remboursé (RO)",
+      "colonne": "FLT_REM_MNT",
+      "definition": "Montant remboursé par l'Assurance Maladie Obligatoire (part légale AMO). Indicateur préfiltré CNAM : déjà calculé sur prs_rem_typ 0 et 1.",
+      "calcul": "SUM(FLT_REM_MNT)",
+      "filtre": "AUCUN filtre manuel — le préfiltrage prs_rem_typ (0,1) est déjà intégré dans la colonne FLT.",
+      "unite": "euros",
+      "synonymes": [
+        "remboursement",
+        "montant RO",
+        "remboursé",
+        "part AMO",
+        "combien a remboursé la sécu",
+        "pris en charge",
+        "remboursement de la sécurité sociale",
+        "ce que paie l'assurance maladie"
+      ]
+    },
+    "depense_engagee": {
+      "label": "Dépense engagée",
+      "colonne": "FLT_PAI_MNT",
+      "definition": "Montant total de la dépense tous financeurs (AMO + complémentaire + reste à charge). Indicateur préfiltré CNAM : déjà calculé sur prs_rem_typ = 0.",
+      "calcul": "SUM(FLT_PAI_MNT)",
+      "filtre": "AUCUN filtre manuel — le préfiltrage prs_rem_typ = 0 est déjà intégré dans la colonne FLT_PAI_MNT.",
+      "unite": "euros",
+      "synonymes": [
+        "dépense totale",
+        "dépense réelle",
+        "montant payé",
+        "coût total",
+        "montant total",
+        "avant remboursement"
+      ]
+    },
+    "taux_couverture": {
+      "label": "Taux de couverture",
+      "definition": "Part de la dépense réelle prise en charge par l'AMO. Mesure la couverture sur la dépense engagée (dépassements inclus).",
+      "calcul": "montant_rembourse / depense_engagee",
+      "unite": "pourcentage",
+      "note": "À ne pas confondre avec le taux de remboursement (remboursé/base) qui a été retiré du périmètre.",
+      "synonymes": [
+        "couverture",
+        "taux de prise en charge AMO",
+        "part remboursée",
+        "pourcentage pris en charge",
+        "combien c'est couvert",
+        "niveau de couverture"
+      ],
+      "attention": "Le 'reste à charge' est le COMPLEMENT du taux de couverture, pas un synonyme. Reste à charge avant complémentaire = depense_engagee - montant_rembourse."
+    },
+    "nombre_actes": {
+      "label": "Nombre d'actes",
+      "colonne": "FLT_ACT_QTE",
+      "definition": "Quantité de prestations. Indicateur préfiltré CNAM (FLT_ACT_QTE), déjà calculé sur prs_rem_typ = 0.",
+      "calcul": "SUM(total_actes_qte)",
+      "unite": "nombre",
+      "note": "Pour un comptage d'actes médicaux, exclure les macro-catégories 'Gestion Financière & Divers' et 'Indemnités & Prévoyance' (versements forfaitaires, pas des actes de soin).",
+      "synonymes": [
+        "actes",
+        "volume",
+        "nombre de prestations",
+        "combien d'actes",
+        "quantité",
+        "combien de fois"
+      ]
+    },
+    "base_remboursement": {
+      "label": "Base de remboursement",
+      "colonne": "FLT_BSE_MNT (ou PRS_REM_BSE selon export)",
+      "definition": "Montant de référence reconnu par l'AMO sur lequel s'applique le taux de remboursement.",
+      "calcul": "SUM(base_remboursement)",
+      "unite": "euros",
+      "synonymes": [
+        "base de remboursement",
+        "BRSS",
+        "tarif de base",
+        "assiette"
+      ]
+    },
+    "montant_depassement": {
+      "label": "Montant de dépassement",
+      "colonne": "FLT_DEP_MNT",
+      "definition": "Dépassements d'honoraires au-delà de la base de remboursement.",
+      "calcul": "SUM(mt_depassement)",
+      "unite": "euros",
+      "synonymes": [
+        "dépassement",
+        "dépassement d'honoraires",
+        "au-delà du tarif"
+      ]
+    }
+  },
+  "dimensions": {
+    "annee": {
+      "label": "Année de soins",
+      "colonne": "soi_ann",
+      "valeurs_disponibles": [
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "note": "Année de la date de soins (soi_ann), pas de la date de remboursement."
+    },
+    "mois": {
+      "label": "Mois de soins",
+      "colonne": "soi_moi",
+      "valeurs_disponibles": "1 à 12",
+      "note": "Saisonnalité visible : creux en août (congés)."
+    },
+    "region": {
+      "label": "Région de résidence du bénéficiaire",
+      "colonne": "ben_res_reg",
+      "note": "Régions de résidence du bénéficiaire (grandes régions depuis 2015, code BEN_RES_REG). Code 99 à exclure. Le Grand Est (44) inclut l'Alsace-Moselle qui n'est pas isolable à cette maille.",
+      "valeurs_disponibles": {
+        "5": "DOM",
+        "11": "Île-de-France",
+        "24": "Centre-Val de Loire",
+        "27": "Bourgogne-Franche-Comté",
+        "28": "Normandie",
+        "32": "Hauts-de-France",
+        "44": "Grand Est",
+        "52": "Pays de la Loire",
+        "53": "Bretagne",
+        "75": "Aquitaine-Limousin-Poitou-Charentes",
+        "76": "Languedoc-Roussillon-Midi-Pyrénées",
+        "84": "Auvergne-Rhône-Alpes",
+        "93": "PACA et Corse",
+        "99": "Inconnu (à exclure)"
+      }
+    },
+    "age": {
+      "label": "Tranche d'âge du bénéficiaire",
+      "colonne": "age_ben_snds",
+      "note": "Tranches d'âge SNDS officielles. Le code 99 (âge inconnu) est à exclure des analyses. Calcul : âge au moment des soins.",
+      "valeurs_disponibles": {
+        "0": "0-19 ans",
+        "20": "20-29 ans",
+        "30": "30-39 ans",
+        "40": "40-49 ans",
+        "50": "50-59 ans",
+        "60": "60-69 ans",
+        "70": "70-79 ans",
+        "80": "80 ans et +",
+        "99": "âge inconnu (à exclure)"
+      }
+    },
+    "sexe": {
+      "label": "Sexe du bénéficiaire",
+      "colonne": "ben_sex_cod",
+      "valeurs_disponibles": {
+        "1": "Masculin",
+        "2": "Féminin",
+        "0": "Inconnu/personne morale",
+        "9": "Valeur inconnue"
+      },
+      "note": "Code BEN_SEX_COD. Pour les analyses, garder 1 (hommes) et 2 (femmes)."
+    },
+    "poste": {
+      "label": "Poste de soin (macro-catégorie / sous-catégorie)",
+      "colonne_macro": "macro_categorie",
+      "colonne_sous": "sous_categorie",
+      "jointure": "via prs_nat sur dim_prestations",
+      "note": "Classification métier. Voir la liste des postes valides."
+    }
+  },
+  "postes": {
+    "Optique": {
+      "sous_categorie": "Optique Médicale",
+      "couverture_amo_typique": "~2% (très faible)",
+      "note": "L'AMO couvre très peu l'optique ; l'essentiel est financé par les complémentaires. Dominée par le 100% Santé. Profil démographique : jeunes (0-19 ans). Reclassement effectué : bilans visuels et verres rattachés à l'optique.",
+      "macro_categorie": "Optique & Audioprothèse",
+      "sous_categorie_cor": "Optique Médicale",
+      "reclassement": "Codes 1100 (bilan visuel Muraine) et 3533 (verres CRPCEN) reclassés depuis 'Appareillages Sensoriels Divers' vers 'Optique Médicale'.",
+      "synonymes": [
+        "lunettes",
+        "verres",
+        "montures",
+        "vue",
+        "optique médicale"
+      ]
+    },
+    "Audioprothèse": {
+      "sous_categorie": "Audioprothèse",
+      "couverture_amo_typique": "~17% (faible, ~19% post-réforme 2021)",
+      "note": "Dominée par le panier libre (~68%). Profil démographique : seniors (70+ ans). Reclassement effectué : accessoires/piles/forfaits audio rattachés à l'audioprothèse. Pas de panier maîtrisé enregistré (C2S absent des données).",
+      "sous_categorie_cor": "Audioprothèse",
+      "reclassement": "Forfaits/accessoires audio rattachés à 'Audioprothèse'. Code 3534 (réparation) laissé dans 'Appareillages Sensoriels Divers'. Mesures audio filtrées sur 'Audioprothèse' seul.",
+      "synonymes": [
+        "audio",
+        "appareils auditifs",
+        "prothèses auditives",
+        "audition",
+        "aides auditives"
+      ]
+    },
+    "Dentaire": {
+      "macro_categorie": "Soins Dentaires & Orthodontie",
+      "sous_categories": [
+        "Soins Dentaires Conservateurs & Divers",
+        "Prothèse Dentaire (RAC 0)",
+        "Prothèse Dentaire (RAC Modéré)",
+        "Prothèse Dentaire (Tarif Libre/Autre)",
+        "Orthodontie"
+      ],
+      "couverture_amo_typique": "~28% (moyenne)",
+      "note": "Couverture contrastée : soins conservateurs bien remboursés (~45%), prothèses tarif libre mal remboursées (~18%). 3 paniers équilibrés. Profil bimodal (jeunes pour ortho + adultes pour prothèses).",
+      "synonymes": [
+        "dents",
+        "soins dentaires",
+        "prothèses dentaires",
+        "orthodontie",
+        "dentiste",
+        "dentaire"
+      ]
+    },
+    "Pharmacie": {
+      "note": "Inclut pharmacie de ville et hospitalière. Croisement possible avec Open Medic (volumes, ATC) pour le détail médicaments.",
+      "synonymes": [
+        "médicaments",
+        "pharma",
+        "officine",
+        "boîtes",
+        "médicament"
+      ]
+    },
+    "Hospitalisation": {
+      "macro_categorie": "Hospitalisation & Chirurgie",
+      "couverture_amo_typique": "élevée (l'hôpital est bien couvert par l'AMO)",
+      "synonymes": [
+        "hôpital",
+        "hospitalier",
+        "séjour hospitalier",
+        "clinique",
+        "hospitalisation"
+      ]
+    },
+    "_note_couverture": "Seuls 5 postes 'phares' sont détaillés ici (Optique, Audioprothèse, Dentaire, Pharmacie, Hospitalisation). Les données contiennent 18 macro-catégories. Tout poste demandé mais non détaillé ici (ex. médecine de ville, biologie, transport, soins infirmiers) doit être traité avec prudence : si le poste existe dans les données il peut être interrogé, sinon refus propre. Ne jamais inventer une couverture AMO non listée."
+  },
+  "paniers_sante": {
+    "colonne": "flag_panier_santé_cor",
+    "valeurs": [
+      "100% Santé",
+      "Panier maîtrisé",
+      "Panier libre",
+      "Hors Dispositif"
+    ],
+    "definition": "Classification des prestations dans le cadre de la réforme 100% Santé (optique, audio, dentaire). 100% Santé = reste à charge zéro ; panier maîtrisé = reste à charge encadré ; panier libre = tarif libre.",
+    "note_correction": "Flag recalculé par Asma. Optique : monture/verre classe A → 100% Santé, classe B → Panier libre, CMU/C2S → Panier maîtrisé. Dentaire : Prothèse RAC 0 → 100% Santé, RAC Modéré → Panier maîtrisé, Tarif Libre → Panier libre. Audio : RAC zéro → 100% Santé."
+  },
+  "ordres_de_grandeur": {
+    "_note": "Plages de plausibilité pour les garde-fous anti-hallucination. Un résultat hors de ces plages doit être signalé comme suspect.",
+    "depense_optique_annuelle_totale": "5-7 Md€/an (tous financeurs)",
+    "remboursement_optique_amo_annuel": "~0,15 Md€/an",
+    "concordance_iso_damir_openmedic": "99,3% sur la pharmacie de ville (2015-2024)",
+    "taux_couverture_global": "~75% (moyenne tous postes, tirée par l'hôpital)",
+    "dentaire_rembourse_periode": "~29 Md€ sur 2022-2025, taux couverture ~28%",
+    "optique_taux_couverture": "~2% (AMO faible, complémentaires financent l'essentiel)",
+    "audio_taux_couverture": "~17% (19% post-réforme 2021)",
+    "dentaire_couverture_par_type": "Soins conservateurs ~45% > Orthodontie ~28% > Prothèse RAC0 ~22% > Tarif Libre ~18% > RAC Modéré ~18%",
+    "_a_valider": "Bornes pharmacie/hospitalisation/global ajoutées à titre indicatif sur le périmètre MCP 2022-2025. À CALER sur les valeurs exactes validées dans Power BI avant la démo.",
+    "remboursement_am_annuel_total": "~125-130 Md€/an (tous postes AMO, ex. 2023 ≈ 128 Md€)",
+    "pharmacie_rembourse_annuel": "~25-27 Md€/an (AMO, ville + hôpital) — À VALIDER",
+    "hospitalisation_rembourse_annuel": "~17-19 Md€/an (AMO) — À VALIDER",
+    "nombre_actes_ordre": "plusieurs milliards d'unités/an (quantités agrégées, pas actes unitaires)"
+  },
+  "hors_perimetre": {
+    "_note": "Le système doit refuser proprement (sans halluciner) les demandes hors périmètre.",
+    "exemples": [
+      "données individuelles / nominatives",
+      "SNDS",
+      "chirurgie esthétique non remboursée",
+      "données postérieures à 2025 ou antérieures à 2022",
+      "prévisions / projections",
+      "transport sanitaire",
+      "cure thermale",
+      "médecine douce",
+      "ostéopathie",
+      "part complémentaire / mutuelle (AMC)",
+      "ce que rembourse la mutuelle",
+      "questions médicales (posologie, effets secondaires, indication)",
+      "conseil médical / quel médicament pour quelle maladie",
+      "données individuelles ou nominatives",
+      "prévisions / projections futures"
+    ],
+    "reponse_type": "Cette information n'est pas disponible dans le périmètre Open DAMIR 2022-2025 chargé pour cette démonstration.",
+    "reponses_specialisees": {
+      "amc_mutuelle": "Open DAMIR ne contient que la part Assurance Maladie Obligatoire (AMO). La part complémentaire (mutuelle / AMC) n'est pas dans ce périmètre. On peut en revanche estimer le reste à charge avant complémentaire (dépense engagée moins remboursement AMO).",
+      "medical": "Cette démonstration interroge des données de remboursement, pas des informations médicales. Je ne peux pas répondre à une question clinique ou de posologie.",
+      "hors_temporel": "Le périmètre chargé pour cette démonstration couvre Open DAMIR 2022-2025. Cette période n'est pas disponible.",
+      "individuel": "Open DAMIR est une base agrégée et anonyme. Aucune donnée individuelle ou nominative n'est accessible."
+    }
+  },
+  "prs_rem_typ_modalites": {
+    "_note": "Type de remboursement. Pour les indicateurs préfiltrés FLT_, ce filtrage est déjà fait. Référence des modalités :",
+    "0": "Prestation de référence",
+    "1": "Complément d'acte",
+    "2": "Ticket modérateur hors C2S",
+    "3": "Supplément hors Alsace-Moselle",
+    "4": "Supplément Alsace-Moselle",
+    "5": "Ticket modérateur C2S",
+    "6": "Forfait C2S",
+    "7": "AME",
+    "10": "Part OC ACS",
+    "11": "Part spécifique CRPCEN",
+    "12": "Part spécifique CANSSM",
+    "13": "Ticket modérateur Mayotte",
+    "99": "Valeur inconnue"
+  },
+  "type_enveloppe_cpt_env_typ": {
+    "_note": "CPT_ENV_TYP — permet de distinguer soins de ville vs hospitalier (utilisé pour le camembert pharmacie ville/hôpital).",
+    "1": "Soins de ville",
+    "2": "Hospitalisation et médico-sociale (médicaments et LPP)",
+    "3": "Prestations légales AM hors env. ONDAM",
+    "4": "Prévention",
+    "7": "C2S/AME/ACS",
+    "8": "Alsace-Moselle"
+  },
+  "classification_postes": {
+    "_note": "Classification métier en macro-catégories et sous-catégories (table dim_prestations, colonnes macro_categorie et sous_categorie_cor). C'est le travail de reclassement d'Asma sur les 1569 prestations.",
+    "cle": "prs_nat (jointure damia_fact_hist → dim_prestations)",
+    "macro_categories": {
+      "Médecine de Ville - Généralistes": [
+        "Consultations & Visites (Généralistes)",
+        "Forfaits & Majorations (Généralistes)",
+        "Consultations Pédiatriques"
+      ],
+      "Médecine de Ville - Spécialistes": [
+        "Consultations & Visites (Spécialistes)",
+        "Forfaits & Majorations (Spécialistes)"
+      ],
+      "Soins Dentaires & Orthodontie": [
+        "Soins Dentaires Conservateurs & Divers",
+        "Prothèse Dentaire (RAC 0)",
+        "Prothèse Dentaire (RAC Modéré)",
+        "Prothèse Dentaire (Tarif Libre/Autre)",
+        "Orthodontie"
+      ],
+      "Optique & Audioprothèse": [
+        "Optique Médicale",
+        "Audioprothèse",
+        "Appareillages Sensoriels Divers"
+      ],
+      "Pharmacie": [
+        "Délivrance de Médicaments",
+        "Honoraires de Dispensation",
+        "Préparations Magistrales"
+      ],
+      "Hospitalisation & Chirurgie": [
+        "Chirurgie & Autres Actes Hospitaliers",
+        "Frais de Séjour & Hébergement",
+        "Dialyse & Hémodialyse",
+        "Réanimation Hospitalière"
+      ],
+      "Dispositifs Médicaux (LPP)": [
+        "Matériel Médical Divers",
+        "Assistance Respiratoire"
+      ],
+      "Soins Paramédicaux": [
+        "Kinésithérapie",
+        "Soins Infirmiers",
+        "Autres Soins Paramédicaux",
+        "Pédicurie-Podologie"
+      ],
+      "Imagerie & Radiologie": [
+        "Radiographie & Scanner",
+        "Échographie",
+        "IRM & Mammographie",
+        "Autres Actes d'Imagerie"
+      ],
+      "Biologie & Laboratoires": [
+        "Analyses Biologiques & Forfaits",
+        "Prélèvements Biologiques"
+      ],
+      "Urgences & SAMU": [
+        "Forfaits & Actes d'Urgence",
+        "Gardes & Astreintes d'Urgence",
+        "Régulation & Interventions SAMU"
+      ],
+      "Maternité & Périnatalité": [
+        "Suivi de Grossesse & Accouchement",
+        "Actes de Sages-Femmes",
+        "Autres Soins Périnataux",
+        "Interruption Volontaire de Grossesse (IVG)"
+      ],
+      "Santé Mentale & Psychiatrie": [
+        "Psychiatrie",
+        "Psychologie",
+        "Autres Actes de Santé Mentale"
+      ],
+      "Prévention & Santé Publique": [
+        "Dépistages & Tests Rapides (Réalisation)",
+        "Vaccination",
+        "Autres Actes de Prévention"
+      ],
+      "Télémédecine & Télésoins": [
+        "Téléconsultations",
+        "Téléexpertise",
+        "Télésurveillance",
+        "Autres Actes de Télémédecine"
+      ],
+      "Transports Sanitaires": [
+        "Autres Transports"
+      ],
+      "Gestion Financière & Divers": [
+        "Codes Administratifs & Forfaits",
+        "Rémunérations Forfaitaires & Contrats",
+        "Participation Assuré & Pénalités"
+      ],
+      "Indemnités & Prévoyance": [
+        "Autres Prestations Sociales",
+        "Aides Sociales & CMU/C2S"
+      ]
+    }
+  }
+}

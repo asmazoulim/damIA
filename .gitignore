@@ -1,0 +1,4 @@
+mcp_damia/data/
+__pycache__/
+*.pyc
+.env
