@@ -26,8 +26,8 @@ from src.backends import OllamaBackend, TransformersBackend  # APIBackend dispo 
 CONFIGS = [
     #("Ollama qwen2.5:7b",          lambda: OllamaBackend(modele="qwen2.5:7b")),
     #("Transformers Qwen3-4B",      lambda: TransformersBackend(model_id="Qwen/Qwen3-4B-Instruct-2507")),
-    ("Transformers Llama-3.2-3B",  lambda: TransformersBackend(model_id="meta-llama/Llama-3.2-3B-Instruct")),
-]
+    ("Transformers Llama-3.2-3B fp16", lambda: TransformersBackend(model_id="meta-llama/Llama-3.2-3B-Instruct", quantize_4bit=False)),
+],
 
 # Vraies questions type de ta demo (on mesure la generation BRUTE du backend,
 # pas le passage MCP, pour isoler la vitesse du modele)
