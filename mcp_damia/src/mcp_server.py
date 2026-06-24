@@ -27,11 +27,15 @@ def get_dictionnaire(terme: str) -> str:
     """Renvoie la definition d'un terme metier DAMIR."""
     return tools.get_dictionnaire(terme)
 
-
 @mcp.tool()
 def list_valeurs(dimension: str) -> str:
     """Liste les valeurs possibles d'une dimension (poste, region, age, sexe, annee)."""
     return tools.list_valeurs(dimension)
+
+@mcp.tool()
+def taux_couverture(poste: str | None = None, annee: int | None = None) -> str:
+    """Calcule le taux de couverture (montant_rembourse / depense_engagee) pour un poste et une année donnés."""
+    return tools.taux_couverture(poste, annee)
 
 
 @mcp.tool()

@@ -32,6 +32,14 @@ except Exception as e:                       # noqa: BLE001
                 f"Question reçue : {question}")
 
 
+@st.cache_resource
+def _init():
+    from src.mcp_client import get_mcp_client
+    from src.backends import get_backend
+    get_backend(); get_mcp_client()   # force le chargement unique
+    return True
+_init()
+
 # ------------------------------------------------------------------ #
 #  (2) ADAPTE LE FORMAT DE RETOUR                                     #
 #      Ton client renvoie peut-être juste une string, ou un dict.     #
@@ -102,7 +110,7 @@ with st.sidebar:
     st.markdown(
         "- **Modèle** : qwen2.5:7b (Ollama, local)\n"
         "- **Données** : Open DAMIR 2022-2025\n"
-        "- **Moteur** : 4 outils paramétrés + dictionnaire métier\n"
+        "- **Moteur** : 5 outils paramétrés + dictionnaire métier\n"
         "- **Principe** : pas de SQL libre. Le LLM choisit un outil, "
         "le code exécute la requête sur DuckDB."
     )
@@ -114,10 +122,11 @@ with st.sidebar:
         st.warning("Moteur non branché : adapte la ligne d'import (1) dans "
                    f"app_streamlit.py.\n\nDétail : {_IMPORT_ERR}")
 
-# --- Questions de démo prêtes à cliquer (évite de taper en live) ---
+# --- Questions de démo (à cliquer pour tester le moteur) ---
 QUESTIONS_DEMO = [
     "Quel est le montant remboursé par l'AM en 2023 ?",
     "Combien pour l'optique en 2023 ?",
+    "Quel est le taux de couverture pour l'optique en 2023 ?",
     "Compare les dépenses dentaires entre 2022 et 2024",
     "Combien a coûté la chirurgie esthétique ?",   # -> doit refuser proprement
 ]

@@ -114,16 +114,21 @@ class APIBackend(ModelBackend):
 # ---------------------------------------------------------------
 # 5) Fabrique
 # ---------------------------------------------------------------
-def get_backend() -> ModelBackend:
+_BACKEND = None
+def get_backend(force_reload=False) -> ModelBackend:
+    global _BACKEND
+    if _BACKEND is not None and not force_reload:
+        return _BACKEND
     choix = os.environ.get("DAMIA_BACKEND", "ollama").lower()
     if choix == "ollama":
-        return OllamaBackend()
+        _BACKEND = OllamaBackend()
     elif choix == "transformers":
-        return TransformersBackend()
+        _BACKEND = TransformersBackend()
     elif choix == "api":
-        return APIBackend()
+        _BACKEND = APIBackend()
     else:
         raise ValueError(f"Backend inconnu : {choix}")
+    return _BACKEND
 
 
 if __name__ == "__main__":

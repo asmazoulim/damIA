@@ -177,6 +177,15 @@ def _valeur_brute(mesure_col, poste, annee):
     res = _connexion().execute(sql, params).fetchone()
     return res[0] if res and res[0] is not None else 0
 
+def taux_couverture(poste=None, annee=None):
+    num = _valeur_brute(MESURES["montant_rembourse"], poste, annee)
+    den = _valeur_brute(MESURES["depense_engagee"], poste, annee)
+    if num is None or den is None:
+        return _message_refus(poste)
+    if not den:
+        return "Donnée insuffisante pour calculer un taux."
+    poste_txt = f" ({poste})" if poste else ""
+    return f"Taux de couverture{poste_txt} : {num/den*100:.1f}%"
 
 def compare_periods(poste=None, annee1=None, annee2=None, mesure="montant_rembourse"):
     """Compare une mesure entre deux annees, evolution en % et valeur."""
