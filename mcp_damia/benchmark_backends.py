@@ -24,8 +24,8 @@ from src.backends import OllamaBackend, TransformersBackend  # APIBackend dispo 
 # Commente/decommente selon la machine et ce que tu veux tester.
 # Les modeles Transformers sont LEGERS et quantifies par defaut sur GPU.
 CONFIGS = [
-    ("Ollama qwen2.5:7b",          lambda: OllamaBackend(modele="qwen2.5:7b")),
-    ("Transformers Qwen3-4B",      lambda: TransformersBackend(model_id="Qwen/Qwen3-4B-Instruct-2507")),
+    #("Ollama qwen2.5:7b",          lambda: OllamaBackend(modele="qwen2.5:7b")),
+    #("Transformers Qwen3-4B",      lambda: TransformersBackend(model_id="Qwen/Qwen3-4B-Instruct-2507")),
     ("Transformers Llama-3.2-3B",  lambda: TransformersBackend(model_id="meta-llama/Llama-3.2-3B-Instruct")),
 ]
 
