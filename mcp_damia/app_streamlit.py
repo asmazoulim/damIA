@@ -6,9 +6,6 @@ Lancement :
     pip install streamlit          # si pas déjà fait
     streamlit run app_streamlit.py
 
-Cette app est une simple COUCHE D'AFFICHAGE par-dessus ton code existant.
-Elle ne réimplémente rien : elle appelle ton client Ollama (src/ollama_client.py),
-qui fait déjà tout le travail (LLM propose un outil -> code valide -> DuckDB répond).
 
 ================================================================================
  POINT D'INTEGRATION UNIQUE — c'est la SEULE chose à adapter (2 endroits ci-dessous)
@@ -21,17 +18,9 @@ import streamlit as st
 # rendre le dossier src/ importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-# ------------------------------------------------------------------ #
-#  (1) IMPORTE TA FONCTION REELLE                                     #
-#      Remplace 'repondre' par le nom exact de ta fonction qui prend  #
-#      une question (str) et renvoie la réponse.                      #
-#      Exemples possibles selon ton code :                            #
-#         from ollama_client import repondre                          #
-#         from ollama_client import poser_question                   #
-#         from ollama_client import traiter_question                 #
-# ------------------------------------------------------------------ #
+
 try:
-    from src.ollama_client import poser_question as _fonction_reponse   
+    from src.assistant import poser_question as _fonction_reponse   
     _IMPORT_OK = True
     _IMPORT_ERR = None
 except Exception as e:                       # noqa: BLE001

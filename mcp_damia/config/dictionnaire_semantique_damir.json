@@ -8,7 +8,7 @@
     "note": "Données ouvertes anonymisées. Aucune donnée individuelle ou sensible. Lecture seule.",
     "note_indicateurs": "Les colonnes de montants de damia_fact_hist sont des indicateurs PRÉFILTRÉS (FLT_*) : le filtrage sur prs_rem_typ est DÉJÀ intégré dans la colonne. Ne PAS refaire de filtre prs_rem_typ manuellement.",
     "note_classification": "Point de vigilance clé : les erreurs de montant (doublement) proviennent d'une mauvaise CLASSIFICATION des prestations (codes mal rattachés à une sous-catégorie, comptés deux fois), PAS du filtre prs_rem_typ. La fiabilité des montants par poste dépend donc de la justesse de dim_prestations (macro_categorie / sous_categorie_cor).",
-    "version_enrichissement": "synonymes + hors-périmètre + ordres de grandeur (19 juin)"
+    "version_enrichissement": "filtre postes + synonymes FR/EN + mots_exclus (source unique de routage)"
   },
   "tables": {
     "damia_fact_hist": {
@@ -205,8 +205,15 @@
         "verres",
         "montures",
         "vue",
-        "optique médicale"
-      ]
+        "optique médicale",
+        "optique",
+        "optical",
+        "verre correcteur"
+      ],
+      "filtre": {
+        "colonne": "sous_categorie_cor",
+        "valeur": "Optique Médicale"
+      }
     },
     "Audioprothèse": {
       "sous_categorie": "Audioprothèse",
@@ -219,8 +226,16 @@
         "appareils auditifs",
         "prothèses auditives",
         "audition",
-        "aides auditives"
-      ]
+        "aides auditives",
+        "audioprothèse",
+        "audioprothese",
+        "hearing",
+        "auditif"
+      ],
+      "filtre": {
+        "colonne": "sous_categorie_cor",
+        "valeur": "Audioprothèse"
+      }
     },
     "Dentaire": {
       "macro_categorie": "Soins Dentaires & Orthodontie",
@@ -239,8 +254,14 @@
         "prothèses dentaires",
         "orthodontie",
         "dentiste",
-        "dentaire"
-      ]
+        "dentaire",
+        "dental",
+        "teeth"
+      ],
+      "filtre": {
+        "colonne": "macro_categorie",
+        "valeur": "Soins Dentaires & Orthodontie"
+      }
     },
     "Pharmacie": {
       "note": "Inclut pharmacie de ville et hospitalière. Croisement possible avec Open Medic (volumes, ATC) pour le détail médicaments.",
@@ -249,8 +270,13 @@
         "pharma",
         "officine",
         "boîtes",
-        "médicament"
-      ]
+        "médicament",
+        "pharmacy"
+      ],
+      "filtre": {
+        "colonne": "macro_categorie",
+        "valeur": "Pharmacie"
+      }
     },
     "Hospitalisation": {
       "macro_categorie": "Hospitalisation & Chirurgie",
@@ -260,10 +286,32 @@
         "hospitalier",
         "séjour hospitalier",
         "clinique",
-        "hospitalisation"
-      ]
+        "hospitalisation",
+        "hospital",
+        "chirurgie hospitalière",
+        "chirurgie hospitaliere"
+      ],
+      "filtre": {
+        "colonne": "macro_categorie",
+        "valeur": "Hospitalisation & Chirurgie"
+      }
     },
-    "_note_couverture": "Seuls 5 postes 'phares' sont détaillés ici (Optique, Audioprothèse, Dentaire, Pharmacie, Hospitalisation). Les données contiennent 18 macro-catégories. Tout poste demandé mais non détaillé ici (ex. médecine de ville, biologie, transport, soins infirmiers) doit être traité avec prudence : si le poste existe dans les données il peut être interrogé, sinon refus propre. Ne jamais inventer une couverture AMO non listée."
+    "_note_couverture": "Seuls 5 postes 'phares' sont détaillés ici (Optique, Audioprothèse, Dentaire, Pharmacie, Hospitalisation). Les données contiennent 18 macro-catégories. Tout poste demandé mais non détaillé ici (ex. médecine de ville, biologie, transport, soins infirmiers) doit être traité avec prudence : si le poste existe dans les données il peut être interrogé, sinon refus propre. Ne jamais inventer une couverture AMO non listée.",
+    "Imagerie": {
+      "macro_categorie": "Imagerie & Radiologie",
+      "synonymes": [
+        "imagerie",
+        "imaging",
+        "radiologie",
+        "radiologue",
+        "scanner",
+        "irm"
+      ],
+      "filtre": {
+        "colonne": "macro_categorie",
+        "valeur": "Imagerie & Radiologie"
+      }
+    }
   },
   "paniers_sante": {
     "colonne": "flag_panier_santé_cor",
@@ -317,7 +365,21 @@
       "medical": "Cette démonstration interroge des données de remboursement, pas des informations médicales. Je ne peux pas répondre à une question clinique ou de posologie.",
       "hors_temporel": "Le périmètre chargé pour cette démonstration couvre Open DAMIR 2022-2025. Cette période n'est pas disponible.",
       "individuel": "Open DAMIR est une base agrégée et anonyme. Aucune donnée individuelle ou nominative n'est accessible."
-    }
+    },
+    "mots_exclus": [
+      "esthetique",
+      "esthétique",
+      "esthetic",
+      "cosmetic",
+      "cosmétique",
+      "confort"
+    ],
+    "mots_amc": [
+      "mutuelle",
+      "complementaire",
+      "complémentaire",
+      "amc"
+    ]
   },
   "prs_rem_typ_modalites": {
     "_note": "Type de remboursement. Pour les indicateurs préfiltrés FLT_, ce filtrage est déjà fait. Référence des modalités :",

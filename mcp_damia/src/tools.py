@@ -1,97 +1,110 @@
 """
 Logique metier des outils MCP : requetes DuckDB + formatage.
 Separe du serveur pour etre testable independamment.
+
+CORRECTIONS / OPTIMISATIONS :
+  - Routage des postes DATA-DRIVEN depuis le dictionnaire (champ `synonymes` + `filtre`)
+    au lieu d'une liste codee en dur -> le dictionnaire est la SOURCE UNIQUE de verite.
+    Modifier le JSON modifie desormais reellement le comportement.
+  - Refus hors-perimetre et message AMC tires du dictionnaire (reponses_specialisees).
+  - Connexion DuckDB persistante (read-only) reutilisee -> plus rapide qu'une
+    ouverture/fermeture a chaque requete.
 """
 import sys
+import json
+import unicodedata
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import json
 import duckdb
 from config.config import CHEMIN_DB, CHEMIN_DICO, MESURES
 
-# Charger le dictionnaire une fois
+# --- Dictionnaire charge une fois ---
 with open(CHEMIN_DICO, encoding="utf-8") as f:
     DICO = json.load(f)
 
 
+# --- Connexion DuckDB persistante (read-only), ouverte paresseusement ---
+_CON = None
 def _connexion():
-    return duckdb.connect(str(CHEMIN_DB), read_only=True)
+    global _CON
+    if _CON is None:
+        _CON = duckdb.connect(str(CHEMIN_DB), read_only=True)
+    return _CON
 
 
 def _sans_accent(s):
-    import unicodedata
     return ''.join(c for c in unicodedata.normalize('NFD', str(s))
                    if unicodedata.category(c) != 'Mn').lower().strip()
 
 
+# ---------------------------------------------------------------------------
+# Routage des postes construit À PARTIR DU DICTIONNAIRE (source unique)
+# ---------------------------------------------------------------------------
+def _construire_routes():
+    """Construit la table de routage poste -> (colonne, valeur) depuis le dico.
+    Chaque poste fournit ses `synonymes` et son `filtre` {colonne, valeur}.
+    La cle du poste elle-meme sert aussi de synonyme."""
+    routes = []
+    for nom, conf in DICO.get("postes", {}).items():
+        if not isinstance(conf, dict) or "filtre" not in conf:
+            continue
+        cles = [nom] + list(conf.get("synonymes", []))
+        cles_norm = [_sans_accent(c) for c in cles if c]
+        col = conf["filtre"]["colonne"]
+        val = conf["filtre"]["valeur"]
+        routes.append((cles_norm, col, val))
+    return routes
+
+_ROUTES = _construire_routes()
+_MOTS_EXCLUS = [_sans_accent(m) for m in DICO.get("hors_perimetre", {}).get("mots_exclus", [])]
+_MOTS_AMC = [_sans_accent(m) for m in DICO.get("hors_perimetre", {}).get("mots_amc", [])]
+
+
 def _clause_poste(poste):
     """Renvoie (fragment_sql, params, reconnu).
-    reconnu=True si le poste correspond a un poste connu du perimetre.
-    reconnu=False -> le poste n'existe pas dans les donnees : il faut REFUSER
-    plutot que d'inventer une correspondance (anti-hallucination).
-    Detecte FR + EN (le petit LLM traduit parfois)."""
+    reconnu=False -> poste hors perimetre : il faut REFUSER (anti-hallucination)."""
     p = _sans_accent(poste)
-    # Termes a EXCLURE explicitement : hors perimetre AMO (non rembourses)
-    HORS_PERIMETRE = ["esthetique", "esthetic", "cosmetic", "confort"]
-    if any(h in p for h in HORS_PERIMETRE):
-        return (None, [], False)   # refus : hors perimetre
-
-    # Mots-cles precis -> (colonne, valeur). Pas de terme trop large isole.
-    MOTS = [
-        (["optique", "optical", "lunette", "verre correcteur"],
-            ("sous_categorie_cor", "Optique Médicale")),
-        (["audioprothese", "audio", "auditi", "hearing"],
-            ("sous_categorie_cor", "Audioprothèse")),
-        (["dentaire", "dental", "orthodont", "teeth", "dent "],
-            ("macro_categorie", "Soins Dentaires & Orthodontie")),
-        (["pharmaci", "pharmacy", "medicament"],
-            ("macro_categorie", "Pharmacie")),
-        (["hospitalisation", "hospital", "chirurgie hospitaliere"],
-            ("macro_categorie", "Hospitalisation & Chirurgie")),
-        (["imagerie", "imaging", "radiolog"],
-            ("macro_categorie", "Imagerie & Radiologie")),
-    ]
-    for cles, (colonne, valeur) in MOTS:
-        if any(c in p for c in cles):
-            return (f"p.{colonne} = ?", [valeur], True)
-
-    # Poste non reconnu : on NE devine PAS. Signal de refus.
+    # 1) exclusions explicites (esthetique, confort, AMC...) -> refus
+    if any(m in p for m in _MOTS_EXCLUS) or any(m in p for m in _MOTS_AMC):
+        return (None, [], False)
+    # 2) routage depuis le dico
+    for cles_norm, col, val in _ROUTES:
+        if any(c in p for c in cles_norm):
+            return (f"p.{col} = ?", [val], True)
+    # 3) inconnu -> on ne devine pas
     return (None, [], False)
 
 
+def _message_refus(poste):
+    """Message de refus adapte : specialise pour l'AMC, generique sinon.
+    Les textes viennent du dictionnaire (reponses_specialisees)."""
+    p = _sans_accent(poste)
+    rs = DICO.get("hors_perimetre", {}).get("reponses_specialisees", {})
+    if any(m in p for m in _MOTS_AMC) and "amc_mutuelle" in rs:
+        return rs["amc_mutuelle"]
+    return (f"Le poste « {poste} » ne fait pas partie du périmètre Open DAMIR "
+            f"(soins remboursés par l'Assurance Maladie, 2022-2025). "
+            f"Aucune donnée disponible — je ne peux pas avancer de chiffre.")
+
+
 def _normaliser_mesure(mesure):
-    """Tolere les variantes du LLM : 's' final, accents, casse, synonymes.
-    Renvoie la cle exacte de MESURES, ou None si vraiment introuvable."""
-    import unicodedata
-    def sa(s):
-        return ''.join(c for c in unicodedata.normalize('NFD', str(s))
-                       if unicodedata.category(c) != 'Mn').lower().strip()
-    m = sa(mesure).rstrip('s')  # enleve accents/casse + 's' final eventuel
-    # Synonymes -> cle canonique
+    """Tolere les variantes du LLM : 's' final, accents, casse, synonymes."""
+    m = _sans_accent(mesure).rstrip('s')
     SYN = {
-        "montant rembourse": "montant_rembourse",
-        "montant_rembourse": "montant_rembourse",
-        "rembourse": "montant_rembourse",
-        "remboursement": "montant_rembourse",
-        "depense engagee": "depense_engagee",
-        "depense_engagee": "depense_engagee",
-        "depense": "depense_engagee",
-        "paiement": "depense_engagee",
-        "nombre acte": "nombre_actes",
-        "nombre_acte": "nombre_actes",
-        "acte": "nombre_actes",
-        "base remboursement": "base_remboursement",
-        "base_remboursement": "base_remboursement",
+        "montant rembourse": "montant_rembourse", "montant_rembourse": "montant_rembourse",
+        "rembourse": "montant_rembourse", "remboursement": "montant_rembourse",
+        "depense engagee": "depense_engagee", "depense_engagee": "depense_engagee",
+        "depense": "depense_engagee", "paiement": "depense_engagee",
+        "nombre acte": "nombre_actes", "nombre_acte": "nombre_actes", "acte": "nombre_actes",
+        "base remboursement": "base_remboursement", "base_remboursement": "base_remboursement",
         "base": "base_remboursement",
-        "depassement": "depassement",
-        "depassement honoraire": "depassement",
+        "depassement": "depassement", "depassement honoraire": "depassement",
     }
     if m in SYN:
         return SYN[m]
-    # Tentative directe sur les cles de MESURES (normalisees)
     for cle in MESURES:
-        if sa(cle).rstrip('s') == m:
+        if _sans_accent(cle).rstrip('s') == m:
             return cle
     return None
 
@@ -106,8 +119,6 @@ def query_depenses(mesure="montant_rembourse", poste=None, annee=None,
     col = MESURES[mesure]
     where, params = [], []
     if annee is not None:
-        # Robustesse : si le LLM envoie une liste [2022, 2024] par erreur,
-        # on prend la 1re annee (pour une vraie comparaison -> compare_periods)
         if isinstance(annee, (list, tuple)):
             annee = annee[0] if annee else None
         if annee is not None:
@@ -126,25 +137,19 @@ def query_depenses(mesure="montant_rembourse", poste=None, annee=None,
     if sexe is not None:
         where.append("f.ben_sex_cod = ?"); params.append(sexe)
     if poste_refuse:
-        return (f"Le poste « {poste} » ne fait pas partie du périmètre Open DAMIR "
-                f"(soins remboursés par l'Assurance Maladie, 2022-2025). "
-                f"Aucune donnée disponible — je ne peux pas avancer de chiffre.")
+        return _message_refus(poste)
     clause = ("WHERE " + " AND ".join(where)) if where else ""
-    # CAST en VARCHAR des deux cotes : prs_nat peut etre lu nombre ici, texte la
     sql = f'''SELECT SUM(f."{col}") FROM faits f
             JOIN prestations p
               ON CAST(f.prs_nat AS VARCHAR) = CAST(p.prs_nat AS VARCHAR)
             {clause}'''
-    con = _connexion()
-    res = con.execute(sql, params).fetchone()
-    con.close()
+    res = _connexion().execute(sql, params).fetchone()
     val = res[0] if res and res[0] is not None else 0
     label = DICO["mesures"].get(mesure, {}).get("label", mesure)
     return _formater(val, mesure, label)
 
 
 def _formater(val, mesure, label):
-    """Formate une valeur numerique selon la mesure."""
     val = val or 0
     if mesure == "nombre_actes":
         return f"{label} : {val:,.0f} actes".replace(",", " ")
@@ -156,27 +161,25 @@ def _formater(val, mesure, label):
 
 
 def _valeur_brute(mesure_col, poste, annee):
-    """Renvoie la valeur numerique brute, ou None si poste hors perimetre."""
+    """Valeur numerique brute, ou None si poste hors perimetre."""
     where, params = [], []
     if annee is not None:
         where.append("f.soi_ann = ?"); params.append(int(annee))
     if poste is not None:
         frag, p_params, reconnu = _clause_poste(poste)
         if not reconnu:
-            return None   # poste hors perimetre -> signal de refus
+            return None
         where.append(frag); params += p_params
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     sql = f'''SELECT SUM(f."{mesure_col}") FROM faits f
             JOIN prestations p ON CAST(f.prs_nat AS VARCHAR)=CAST(p.prs_nat AS VARCHAR)
             {clause}'''
-    con = _connexion()
-    res = con.execute(sql, params).fetchone()
-    con.close()
+    res = _connexion().execute(sql, params).fetchone()
     return res[0] if res and res[0] is not None else 0
 
 
 def compare_periods(poste=None, annee1=None, annee2=None, mesure="montant_rembourse"):
-    """Compare une mesure entre deux annees, avec evolution en % et valeur."""
+    """Compare une mesure entre deux annees, evolution en % et valeur."""
     mc = _normaliser_mesure(mesure)
     if mc is None:
         return f"Mesure inconnue. Disponibles : {', '.join(MESURES)}"
@@ -187,9 +190,7 @@ def compare_periods(poste=None, annee1=None, annee2=None, mesure="montant_rembou
     v1 = _valeur_brute(col, poste, annee1)
     v2 = _valeur_brute(col, poste, annee2)
     if v1 is None or v2 is None:
-        return (f"Le poste « {poste} » ne fait pas partie du périmètre Open DAMIR "
-                f"(soins remboursés par l'Assurance Maladie). Comparaison impossible — "
-                f"je ne peux pas avancer de chiffre.")
+        return _message_refus(poste) + " Comparaison impossible."
 
     def fmt(v):
         if mc == "nombre_actes":
@@ -212,8 +213,10 @@ def get_dictionnaire(terme):
     t = terme.lower().strip()
     for section in ("mesures", "dimensions", "postes"):
         for cle, c in DICO.get(section, {}).items():
-            if t in cle.lower() or t in str(c.get("label","")).lower():
-                return f"{c.get('label', cle)} : {c.get('definition') or c.get('note','')}"
+            if not isinstance(c, dict):
+                continue
+            if t in cle.lower() or t in str(c.get("label", "")).lower():
+                return f"{c.get('label', cle)} : {c.get('definition') or c.get('note', '')}"
     return f"Terme '{terme}' non trouve dans le dictionnaire."
 
 
