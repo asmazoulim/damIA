@@ -110,7 +110,7 @@ def poser_question(question):
     try:
         resultat = client.call_tool(nom, params)
     except Exception as e:
-        return {"reponse": "L'appel de l'outil via MCP a echoue. Reformulez la question ?",
+        return {"reponse": f"[DEBUG] Erreur MCP reelle : {e}",
                 "outil": nom, "parametres": params}
 
     return {"reponse": str(resultat), "outil": nom, "parametres": params}

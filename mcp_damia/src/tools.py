@@ -109,6 +109,23 @@ def _normaliser_mesure(mesure):
     return None
 
 
+def _normaliser_annee(annee):
+    """Tolere tout ce que le LLM peut envoyer : int, '2023', ['2023',...],
+    '2022-2025', '', None. Renvoie un int unique, ou None (= pas de filtre annee)."""
+    if annee is None or annee == "":
+        return None
+    if isinstance(annee, (list, tuple)):
+        # une liste d'annees -> on ne filtre pas (tout le perimetre)
+        return None
+    s = str(annee).strip()
+    if "-" in s or "/" in s:
+        # une plage type "2022-2025" -> pas de filtre (tout le perimetre)
+        return None
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return None
+    
 def query_depenses(mesure="montant_rembourse", poste=None, annee=None,
                    region=None, age=None, sexe=None):
     """Calcule une mesure avec filtres optionnels."""
@@ -118,11 +135,9 @@ def query_depenses(mesure="montant_rembourse", poste=None, annee=None,
     mesure = mesure_canon
     col = MESURES[mesure]
     where, params = [], []
+    annee = _normaliser_annee(annee)
     if annee is not None:
-        if isinstance(annee, (list, tuple)):
-            annee = annee[0] if annee else None
-        if annee is not None:
-            where.append("f.soi_ann = ?"); params.append(int(annee))
+        where.append("f.soi_ann = ?"); params.append(annee)
     poste_refuse = False
     if poste is not None:
         frag, p_params, reconnu = _clause_poste(poste)
@@ -216,6 +231,80 @@ def compare_periods(poste=None, annee1=None, annee2=None, mesure="montant_rembou
                 f"Evolution : {evol:+.1f}% ({sens}).")
     return f"{label}{poste_txt} : {annee1} = {fmt(v1)}, {annee2} = {fmt(v2)}."
 
+def _fmt(v, mesure):
+    v = v or 0
+    if mesure == "nombre_actes":
+        return f"{v:,.0f} actes".replace(",", " ")
+    if abs(v) >= 1e9: return f"{v/1e9:.2f} Md EUR"
+    if abs(v) >= 1e6: return f"{v/1e6:.2f} M EUR"
+    return f"{v:,.2f} EUR".replace(",", " ")
+ 
+ 
+def top_postes(mesure="montant_rembourse", annee=None, n=5):
+    """Classement des postes de soin par mesure (top N)."""
+    mc = _normaliser_mesure(mesure)
+    if mc is None:
+        return f"Mesure inconnue. Disponibles : {', '.join(MESURES)}"
+    col = MESURES[mc]
+    where, params = [], []
+    if annee is not None:
+        where.append("f.soi_ann = ?"); params.append(int(annee))
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f'''SELECT p.macro_categorie, SUM(f."{col}") s FROM faits f
+            JOIN prestations p ON CAST(f.prs_nat AS VARCHAR)=CAST(p.prs_nat AS VARCHAR)
+            {clause} GROUP BY p.macro_categorie ORDER BY s DESC LIMIT ?'''
+    rows = _connexion().execute(sql, params + [int(n)]).fetchall()
+    an = f" ({annee})" if annee else ""
+    return f"Top {n} postes — {mc}{an} : " + " | ".join(f"{m} : {_fmt(s, mc)}" for m, s in rows)
+ 
+ 
+def repartition(mesure="montant_rembourse", dimension="poste", annee=None, poste=None):
+    """Ventile une mesure selon une dimension : poste, region, age ou sexe."""
+    mc = _normaliser_mesure(mesure)
+    if mc is None:
+        return f"Mesure inconnue. Disponibles : {', '.join(MESURES)}"
+    col = MESURES[mc]
+    DIM = {"region": "f.ben_res_reg", "age": "f.age_ben_snds",
+           "sexe": "f.ben_sex_cod", "poste": "p.macro_categorie"}
+    d = dimension.lower().strip()
+    if d not in DIM:
+        return f"Dimension '{dimension}' non répartissable. Choix : {', '.join(DIM)}"
+    where, params = [], []
+    if annee is not None:
+        where.append("f.soi_ann = ?"); params.append(int(annee))
+    if poste is not None:
+        frag, p_params, reconnu = _clause_poste(poste)
+        if not reconnu:
+            return _message_refus(poste)
+        where.append(frag); params += p_params
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f'''SELECT {DIM[d]} k, SUM(f."{col}") s FROM faits f
+            JOIN prestations p ON CAST(f.prs_nat AS VARCHAR)=CAST(p.prs_nat AS VARCHAR)
+            {clause} GROUP BY {DIM[d]} ORDER BY s DESC'''
+    rows = _connexion().execute(sql, params).fetchall()
+    an = f" ({annee})" if annee else ""
+    return f"Répartition par {d}{an} — {mc} : " + " | ".join(f"{k} : {_fmt(s, mc)}" for k, s in rows[:12])
+ 
+ 
+def evolution_serie(mesure="montant_rembourse", poste=None):
+    """Série temporelle d'une mesure sur toutes les années disponibles."""
+    mc = _normaliser_mesure(mesure)
+    if mc is None:
+        return f"Mesure inconnue. Disponibles : {', '.join(MESURES)}"
+    col = MESURES[mc]
+    where, params = [], []
+    if poste is not None:
+        frag, p_params, reconnu = _clause_poste(poste)
+        if not reconnu:
+            return _message_refus(poste)
+        where.append(frag); params += p_params
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f'''SELECT f.soi_ann a, SUM(f."{col}") s FROM faits f
+            JOIN prestations p ON CAST(f.prs_nat AS VARCHAR)=CAST(p.prs_nat AS VARCHAR)
+            {clause} GROUP BY f.soi_ann ORDER BY f.soi_ann'''
+    rows = _connexion().execute(sql, params).fetchall()
+    pt = f" ({poste})" if poste else ""
+    return f"Évolution {mc}{pt} : " + " | ".join(f"{a} : {_fmt(s, mc)}" for a, s in rows)
 
 def get_dictionnaire(terme):
     """Renvoie la definition d'un terme metier."""

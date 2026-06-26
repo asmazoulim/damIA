@@ -87,41 +87,34 @@ st.markdown(f"""
 <style>
   .bandeau {{
      background: linear-gradient(90deg, {VIOLET} 0%, {BLEU} 100%);
-     padding: 18px 22px; border-radius: 12px; margin-bottom: 8px;
+     padding: 20px 25px; border-radius: 12px; margin-bottom: 15px;
+     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   }}
-  .bandeau h1 {{ color:#fff; margin:0; font-size:1.35rem; font-weight:600; }}
-  .bandeau p {{ color:#E6E1F0; margin:4px 0 0; font-size:0.9rem; }}
+  .bandeau h1 {{ color:#ffffff; margin:0; font-size:1.4rem; font-weight:600; letter-spacing: 0.5px; }}
+  .bandeau p {{ color:#E6E1F0; margin:8px 0 0; font-size:0.95rem; }}
   .pastille {{
-     display:inline-block; background:{TURQUOISE}; color:#fff;
-     padding:3px 10px; border-radius:20px; font-size:0.75rem; margin-right:6px;
+     display:inline-block; background:{TURQUOISE}; color:#ffffff;
+     padding:4px 12px; border-radius:20px; font-size:0.8rem; font-weight: bold; margin-right:8px;
   }}
-  .outil-box {{ font-family:monospace; font-size:0.85rem; }}
 </style>
 <div class="bandeau">
-  <h1>Assistant Open DAMIR — interrogez les données en langage naturel</h1>
-  <p><span class="pastille">100% local</span><span class="pastille">souverain</span>
-     Aucune donnée ne quitte le poste. Le modèle propose, le code valide et ne ment jamais.</p>
+  <h1>Assistant Open DAMIR — Démonstrateur MCP</h1>
+  <p><span class="pastille">Model-Agnostic</span><span class="pastille">Zéro Hallucination Numérique</span>
+     Aucune donnée ne quitte le serveur métier. Le LLM orchestre, le code exécute la requête SQL.</p>
 </div>
 """, unsafe_allow_html=True)
 
 # --- Barre latérale : contexte + transparence (parle bien à une direction) ---
 with st.sidebar:
-    st.subheader("À propos de la démo")
+    st.subheader("Architecture de la démo")
     st.markdown(
-        "- **Modèle** : qwen2.5:7b (Ollama, local)\n"
-        "- **Données** : Open DAMIR 2022-2025\n"
-        "- **Moteur** : 5 outils paramétrés + dictionnaire métier\n"
-        "- **Principe** : pas de SQL libre. Le LLM choisit un outil, "
-        "le code exécute la requête sur DuckDB."
+        f"- **Protocole** : Standard MCP (Model Context Protocol)\n"
+        f"- **Modèle Client** : Agnostique (interchangeable)\n"
+        f"- **Données** : Open DAMIR 2022-2025 (DuckDB locale)\n"
+        f"- **Moteur** : Dictionnaire métier data-driven"
     )
     st.divider()
-    st.caption("Le panneau « Détail technique » sous chaque réponse montre "
-               "quel outil a été appelé et avec quels paramètres — "
-               "preuve que le chiffre vient des données, pas du modèle.")
-    if not _IMPORT_OK:
-        st.warning("Moteur non branché : adapte la ligne d'import (1) dans "
-                   f"app_streamlit.py.\n\nDétail : {_IMPORT_ERR}")
-
+    st.caption("Le panneau « 🛠️ Détail technique » sous chaque réponse prouve que le chiffre vient de la base de données, et non des poids du modèle.")
 # --- Questions de démo (à cliquer pour tester le moteur) ---
 QUESTIONS_DEMO = [
     "Quel est le montant remboursé par l'AM en 2023 ?",
@@ -130,20 +123,31 @@ QUESTIONS_DEMO = [
     "Compare les dépenses dentaires entre 2022 et 2024",
     "Combien a coûté la chirurgie esthétique ?",   # -> doit refuser proprement
 ]
-
-st.write("**Questions de démonstration :**")
-cols = st.columns(2)
+# --- Questions de démo (masquées par défaut pour épurer l'UI) ---
 question_cliquee = None
-for i, q in enumerate(QUESTIONS_DEMO):
-    if cols[i % 2].button(q, key=f"demo_{i}", use_container_width=True):
-        question_cliquee = q
+with st.expander("💡 Suggestions de questions pour la démonstration", expanded=False):
+    cols = st.columns(2)
+    for i, q in enumerate(QUESTIONS_DEMO):
+        if cols[i % 2].button(q, key=f"demo_{i}", use_container_width=True):
+            question_cliquee = q
 
+# --- Écran d'accueil (affiché uniquement si le chat est vide) ---
+if "messages" not in st.session_state or len(st.session_state.messages) == 0:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("Périmètre des données embarquées")
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric(label="Période couverte", value="2022 - 2025")
+    kpi2.metric(label="Volume de faits", value="~11,8 Millions", delta="Agréments CNAM")
+    kpi3.metric(label="Prestations classées", value="1 569", delta="Dictionnaire actif")
+    st.markdown("<br><hr>", unsafe_allow_html=True)
+    
 # --- Historique de conversation ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+    avatar = "👤" if msg["role"] == "user" else "⚕️"
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
         if msg.get("detail"):
             with st.expander("Détail technique"):
@@ -160,9 +164,9 @@ for msg in st.session_state.messages:
 
 def _traiter(question):
     st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="👤"):
         st.markdown(question)
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="⚕️"):
         with st.spinner("Le modèle choisit un outil, le code interroge la base…"):
             res = interroger(question)
         st.markdown(res["reponse"])

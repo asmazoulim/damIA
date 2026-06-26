@@ -1,4 +1,5 @@
-mcp_damia/data/
+mcp_damia/data/*
+!data/damia.duckdb
 __pycache__/
 *.pyc
 .env

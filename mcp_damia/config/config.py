@@ -18,7 +18,7 @@ CSV_PRESTATIONS = DOSSIER_DATA / "dim_prestations.csv"
 CHEMIN_DICO = DOSSIER_CONFIG / "dictionnaire_semantique_damir.json"
 
 # Modele Ollama
-MODELE_OLLAMA = "qwen2.5:7b"   
+MODELE_OLLAMA = "llama3.2:3b"   # "qwen2.5:7b" 
 TEMPERATURE = 0.1              # bas = moins d'hallucination
 
 # Colonnes de mesures (noms REELS de la table exportee d'EDEN)
